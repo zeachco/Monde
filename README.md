@@ -730,15 +730,20 @@ production app yet ([section 9](#9-status-and-roadmap)).
 ### Prerequisites
 
 - **Node 22** (`.nvmrc`) and npm.
-- **Git LFS** for art and audio: `git lfs install` once, then `git lfs pull`. A fresh `git worktree` holds
-  pointer files instead; `git lfs checkout client/public/assets` fills them in (without them every sprite is a
-  black square).
+- **Git LFS** for art and audio: `git lfs install` once (globally, or `git lfs install --local` in the repo),
+  then `git lfs pull`. The install step configures LFS's checkout hooks: without it, `git lfs pull` still
+  fetches the objects but **silently skips the checkout** ("Skipping object checkout, Git LFS is not installed
+  for this repository"), the pointer files stay in the worktree, and every sprite renders as a black box.
+  Diagnose with `grep -rlI '^version https://git-lfs.github.com' client/public`; repair with
+  `git lfs install && git lfs pull` (objects already in `.git/lfs` need no network). A fresh `git worktree`
+  holds pointer files too; `git lfs checkout client/public/assets` fills them in.
 - **Python 3** for `verify:puzzles` (CI uses 3.12). Optional: Pillow (desktop icon), numpy, scipy and ffmpeg
   (ambience), the Codex CLI (art generation), `flyctl` (deploys).
 - On Kasey's Mac, Node runs as x86_64 under Rosetta; that is fine for Vite and Phaser.
 
 ```
 git clone https://github.com/seykafu/Monde.git && cd Monde
+git lfs install
 git lfs pull
 npm install
 npm run dev            # the game on http://localhost:5173, in Quiet Mode
@@ -777,6 +782,25 @@ npm run dev:server                              # http://localhost:8080
 VITE_MIND_URL=http://localhost:8080 npm run dev
 # then open http://localhost:5173/?invite=anything
 ```
+
+### Skipping the title screen and intro (dev)
+
+The client reads URL parameters at boot (`client/src/main.ts`), so a dev build can jump past the title screen
+and the Day-1 ferry intro:
+
+| URL | Effect |
+|---|---|
+| `?skiptitle=1` | Boots straight into the town: skips the title screen **and** the Day-1 S01a ferry intro, auto-signing a default Fellowship. |
+| `?day=N&time=HH:MM` | Starts the clock anywhere (e.g. `?day=80&time=21:30`); the parameter's presence also suppresses the S01a warp. |
+| `?scene=<id>` | Plays a story scene immediately (once per page load). |
+| `?spring=<style>&day=25` | Day-25 dev preset with S01–S09 story flags pre-completed (dev build or `?dev`; pair with `?skiptitle=1&offline`). |
+| `?puzzle=PZ-xx`, `?scuffle` | Open a puzzle or a scuffle directly. |
+| `?demo=1`, `?looks=1`, `?perf=1` | Diorama demo, sprite contact sheet, perf harness. |
+
+In dev builds (or with `?dev`), the console exposes `window.__story` — `__story.list()`, `__story.play(id)`,
+`__story.set(flag)`, `__story.unset(flag)`, `__story.check()` — to force-play or force-complete story scenes.
+`[` / `]` / `\` in the zone fast-forward the clock by one hour or cycle weather. Inside any scene, click or
+Enter/Space skips the typewriter and pages dialogue.
 
 ### Commands
 
