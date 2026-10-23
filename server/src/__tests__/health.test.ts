@@ -15,11 +15,21 @@ afterEach(async () => {
 describe("monde-mind", () => {
   it("uses safe defaults without optional services", () => {
     expect(parseConfig({})).toEqual({
-      WORLD_DAILY_BUDGET_USD: 0.06, GLOBAL_DAILY_BUDGET_USD: 10, CENSUS_BUDGET_USD: 3, PORT: 8080, NODE_ENV: "development", MONDE_ENV: "dev", LOG_LEVEL: "info", GIT_SHA: "dev",
+      MIND_PROVIDER: "anthropic", WORLD_DAILY_BUDGET_USD: 0.06, GLOBAL_DAILY_BUDGET_USD: 10, CENSUS_BUDGET_USD: 3, PORT: 8080, NODE_ENV: "development", MONDE_ENV: "dev", LOG_LEVEL: "info", GIT_SHA: "dev",
     });
     expect(parseConfig({ PORT: "9090", MONDE_ENV: "staging", MONDE_TOKEN_SECRET: "test-secret" }).PORT).toBe(9090);
     expect(() => parseConfig({ PORT: "invalid" })).toThrow();
     expect(() => parseConfig({ MONDE_ENV: "invalid" })).toThrow();
+  });
+  it("keeps per-role model vars strict Claude ids on the anthropic path and open on the openai path", () => {
+    expect(() => parseConfig({ MIND_MODEL: "gemma4:e2b" })).toThrow();
+    expect(parseConfig({ MIND_MODEL: "claude-haiku-5-5" }).MIND_MODEL).toBe("claude-haiku-5-5");
+    const openai = parseConfig({ MIND_PROVIDER: "openai", MIND_MODEL: "gemma4:e2b", MIND_MODEL_DIALOGUE: "qwen3.8" });
+    expect(openai.MIND_PROVIDER).toBe("openai");
+    expect(openai.MIND_MODEL).toBe("gemma4:e2b");
+    expect(openai.MIND_MODEL_DIALOGUE).toBe("qwen3.8");
+    expect(() => parseConfig({ MIND_PROVIDER: "openai", MIND_MODEL: "" })).toThrow();
+    expect(() => parseConfig({ MIND_PROVIDER: "openai" })).toThrow(/MIND_MODEL is required/);
   });
   it("reports disabled services and request ids", async () => {
     const response = await app().inject({ url: "/v1/health" });

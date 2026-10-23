@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL, modelDefinition } from "./models.js";
+import { DEFAULT_MODEL, isClaudeModel, modelDefinition } from "./models.js";
 /**
  * Claude Haiku 5.5 prices for cost logging (GDD §9.15, cached October 2026; re-check live before committing a
  * budget). Prompts here are always ≤ 100K tokens, so the base tier applies.
@@ -25,6 +25,8 @@ export const NO_TOKENS: CallTokens = { input: 0, output: 0, cacheRead: 0, cacheW
 export const BATCH_FACTOR = 0.5;
 
 export function costUsd(tokens: CallTokens, model: string = DEFAULT_MODEL, factor = 1): number {
+  // Non-Claude models run on a local or free OpenAI-compatible endpoint, so they cost the world nothing.
+  if (!isClaudeModel(model)) return 0;
   const definition = modelDefinition(model);
   const prices = { input: definition.input, output: definition.output, cacheRead: definition.input * definition.cacheReadFactor, cacheWrite: definition.input * definition.cacheWriteFactor };
   return (tokens.input * prices.input + tokens.output * prices.output

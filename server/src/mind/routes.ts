@@ -39,6 +39,8 @@ import {
   WRAP_UP_NOTE, generateTurn, prewarmParams, type CallRecord, type DialogueTimings, type TurnFailure,
 } from "./dialogue.js";
 import { aiLogRow, persistTurn } from "./effects.js";
+import { isClaudeModel } from "./models.js";
+import type { Embedder } from "./openaiClient.js";
 import { LEAVE_CHOICE, THINKING_BEAT, fallbackTurn, giftLine } from "./fallback.js";
 import { tokensOf, type MindClient } from "./mindClient.js";
 import { PlayerProfile, PlayerProfilePatch, savePlayerProfile, storedProfile } from "./player.js";
@@ -51,6 +53,8 @@ export interface MindRouteOptions {
   prewarmIntervalMs?: number;
   /** GDD-GAP: a prewarm is prefill only (no output); 5 s is ample and keeps a stuck call from piling up. */
   prewarmTimeoutMs?: number;
+  /** The cheap path's scorer (MIND_EMBED_MODEL): ranks the choice pool and weighs the Fellow's words. */
+  embedder?: Embedder | null;
   now?: () => number;
 }
 
@@ -289,6 +293,14 @@ export function registerMindRoutes(app: FastifyInstance, db: WorldDatabase | und
             validation: ctx.validation,
             timings: options.timings,
             signal: generation.signal,
+            // Cheap path (non-Claude dialogue model): the engine disposes choices and effects from these.
+            focus: (() => {
+              const wanted = ctx.input.focus ?? (ctx.input.playerSaid === WALK_UP ? "open" : "reply");
+              return wanted === "quest" && !ctx.input.quest ? "reply" : wanted;
+            })(),
+            playerSaid: ctx.input.playerSaid,
+            emotion: ctx.prefix.state.mood.emotion,
+            embedder: options.embedder ?? null,
             onLineDelta: (delta) => { if (cleared) send("line_delta", delta); else held.push(delta); },
             onThinking: () => send("thinking", { text: THINKING_BEAT }),
             onHardFailure: (reason) => { restartReason = reason; },
@@ -368,6 +380,8 @@ export function registerMindRoutes(app: FastifyInstance, db: WorldDatabase | und
     const worldId = request.params.w;
     const residentId = parsed.data.resident_id;
     if (!mind.enabled) return { warmed: false, reason: "disabled" };
+    // A non-Claude endpoint has no prompt cache to write; prewarming would only burn local inference.
+    if (!isClaudeModel(routerFor(db).resolve("dialogue").model)) return { warmed: false, reason: "no-cache-provider" };
 
     const key = `${worldId}:${residentId}:${routerFor(db).resolve("dialogue").model}`;
     const at = now();

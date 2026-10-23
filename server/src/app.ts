@@ -17,6 +17,7 @@ import { registerSnapshotRoutes } from "./worlds/snapshots.js";
 import type { WorldDatabase } from "./worlds/createWorld.js";
 import { promptVersion } from "./mind/promptBuilder.js";
 import { createMindClient, type MindClient } from "./mind/mindClient.js";
+import { createOpenAIEmbedder, type Embedder } from "./mind/openaiClient.js";
 import { registerMindRoutes } from "./mind/routes.js";
 import type { DialogueTimings } from "./mind/dialogue.js";
 import { NightRunner } from "./mind/night.js";
@@ -48,6 +49,8 @@ export interface AppOptions {
   mind?: MindClient;
   dialogueTimings?: Partial<DialogueTimings>;
   prewarmIntervalMs?: number;
+  /** The cheap path's scorer; defaults to MIND_EMBED_MODEL on the openai provider (reactions.ts). */
+  embedder?: Embedder | null;
   /** The night pass runner (M-07). Tests pass their own to tune the budget and await background work. */
   nightRunner?: NightRunner;
 }
@@ -108,6 +111,9 @@ export function buildApp(config: Config, testDb?: WorldDatabase, options: AppOpt
     mind,
     timings: options.dialogueTimings,
     prewarmIntervalMs: options.prewarmIntervalMs,
+    embedder: options.embedder ?? (config.MIND_PROVIDER === "openai" && config.MIND_EMBED_MODEL
+      ? createOpenAIEmbedder(config.MIND_BASE_URL, config.MIND_EMBED_MODEL, config.MIND_API_KEY)
+      : null),
   });
   const nightRunner = options.nightRunner
     ?? (db ? new NightRunner({ db, mind, contentDir: config.MONDE_CONTENT_DIR, log: app.log }) : undefined);

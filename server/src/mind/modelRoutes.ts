@@ -21,7 +21,10 @@ export function registerModelRoutes(app: FastifyInstance, config: Config, db: Wo
     timer.unref();
   });
   app.addHook('onClose', async () => { clearInterval(timer); });
-  const body = z.object({ role: ModelRoleSchema, model: ModelIdSchema.nullable() }).strict();
+  // The override is a Claude id on the anthropic path, any model name on the openai path (config.ts).
+  const body = (config.MIND_PROVIDER === 'openai'
+    ? z.object({ role: ModelRoleSchema, model: z.string().min(1).nullable() }).strict()
+    : z.object({ role: ModelRoleSchema, model: ModelIdSchema.nullable() }).strict());
   for (const method of ['GET', 'PUT'] as const) app.route<{ Querystring: { token?: string } }>({ method, url: '/admin/models', handler: async (request, reply) => {
     reply.header('cache-control', 'no-store').header('referrer-policy', 'no-referrer');
     if (!config.ADMIN_TOKEN) return reply.code(404).send({ error: 'not found' });

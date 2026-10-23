@@ -1,4 +1,4 @@
-import { modelParams, defaultRouter, type ModelRouter } from "./models.js";
+import { isClaudeModel, modelParams, defaultRouter, type ModelRouter } from "./models.js";
 import { BudgetError } from "./budget.js";
 /**
  * One dialogue turn against the model (GDD §9.10 flow, §9.13 pipeline; MVP M-05).
@@ -22,12 +22,18 @@ import { BudgetError } from "./budget.js";
  * (salvage.ts): the whole lines are kept, choices come from the last line, and effects only if they arrived
  * whole. Refusals, timeouts with nothing streamed and API errors go to the authored fallback.
  *
+ * When the dialogue role points at a non-Claude model (MIND_PROVIDER=openai), generateTurn takes the cheap
+ * path instead (cheapDialogue.ts): the small model streams the lines as plain text, and the engine disposes
+ * the choices and effects (reactions.ts).
+ *
  * This module has no I/O of its own beyond the MindClient: the route streams, effects.ts persists.
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import { DialogueTurnOutput, LIMITS, fitText, modelOutputFormat, splitLine } from "@monde/shared";
-import { apiParams, historyBlock, requestSettings, type MindRequest } from "./promptBuilder.js";
+import { apiParams, historyBlock, requestSettings, type MindRequest, type TurnFocus, WALK_UP } from "./promptBuilder.js";
 import { MindStreamError, MindUnavailableError, tokensOf, type MindClient } from "./mindClient.js";
+import type { Embedder } from "./openaiClient.js";
+import { cheapTurn } from "./cheapDialogue.js";
 import { currencyHit, lexicalHits } from "./filters.js";
 import { misgenderHit } from "./naming.js";
 import { borrowedHits, stripTics } from "./voice.js";
@@ -126,6 +132,15 @@ export interface GenerateOptions {
   /** A hard validation failure; lets the route attach its reason to a subsequent visible restart. */
   onHardFailure?: (reason: string) => void;
   now?: () => number;
+  /**
+   * Cheap path only (non-Claude dialogue model): what this turn answers (promptBuilder.turnFocus), the Fellow's
+   * words (WALK_UP when they walked up), the resident's current mood emotion, and the embedder the scorer uses
+   * to rank choices and weigh the player's words (reactions.ts). Ignored on the Claude path.
+   */
+  focus?: TurnFocus;
+  playerSaid?: string;
+  emotion?: string;
+  embedder?: Embedder | null;
 }
 
 const FAILURE_MESSAGES: Record<TurnFailureCode, string> = {
@@ -139,7 +154,7 @@ const FAILURE_MESSAGES: Record<TurnFailureCode, string> = {
   invalid_output: "The reply failed validation twice; using an authored line.",
   aborted: "The client went away.",
 };
-const failure = (code: TurnFailureCode): TurnFailure => ({ code, message: FAILURE_MESSAGES[code] });
+export const failure = (code: TurnFailureCode): TurnFailure => ({ code, message: FAILURE_MESSAGES[code] });
 
 /**
  * The API body for a dialogue attempt: the builder's request with `notes` appended as extra text blocks in the
@@ -176,13 +191,13 @@ export function prewarmParams(prefix: ResidentPrefix, day: number, history = "",
   } as Anthropic.MessageCreateParamsNonStreaming, router);
 }
 
-const textOf = (message: Anthropic.Message): string =>
+export const textOf = (message: Anthropic.Message): string =>
   message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
 
 /** A call of an attempt that didn't supply its result (a hedge that lost, a first try that failed). */
-interface ExtraCall { tokens: CallTokens; latencyMs: number; firstTokenMs: number | null; validation: string }
+export interface ExtraCall { tokens: CallTokens; latencyMs: number; firstTokenMs: number | null; validation: string }
 
-type Attempt =
+export type Attempt =
   | { kind: "message"; message: Anthropic.Message; latencyMs: number; firstTokenMs: number | null; extra: ExtraCall[] }
   | {
     kind: "failed"; code: "timeout" | "aborted" | "budget" | "safety" | "unavailable" | "api_error"; error: unknown; tokens: CallTokens; latencyMs: number;
@@ -211,7 +226,7 @@ const tokensOfError = (error: unknown): CallTokens => (error instanceof MindStre
  * One attempt: a streamed call, plus at most one more of the same request (the hedge at `hedgeMs`, or a fast retry
  * when the first fails before any text). Whichever streams first supplies the attempt; the other is cancelled.
  */
-async function callOnce(
+export async function callOnce(
   mind: MindClient,
   params: Anthropic.MessageCreateParamsNonStreaming,
   timings: DialogueTimings,
@@ -332,7 +347,7 @@ async function callOnce(
  * Monde's, a card sample quoted back, the resident's own tic said twice (`earlier`: this turn's lines before it).
  * A slip held back before anything shows leaves the attempt silent, so its regeneration never reads as a restart.
  */
-function streamSafe(text: string, validation: ValidationContext, earlier: readonly string[]): boolean {
+export function streamSafe(text: string, validation: ValidationContext, earlier: readonly string[]): boolean {
   if (lexicalHits(text).length > 0) return false;
   if (borrowedHits(text, validation.borrowed ?? []).length > 0) return false;
   if (validation.fellow && misgenderHit(text, validation.fellow)) return false;
@@ -363,6 +378,17 @@ function salvage(raw: string, validation: ValidationContext): { output: Dialogue
 export async function generateTurn(options: GenerateOptions): Promise<GenerateResult> {
   const router = options.router ?? defaultRouter;
   const selectedModel = router.resolve("dialogue").model;
+  // A non-Claude model (MIND_PROVIDER=openai, e.g. Ollama's gemma4:e2b) is not trusted with the structured turn:
+  // it writes the lines as plain text, and the engine disposes the choices and effects (cheapDialogue.ts).
+  if (!isClaudeModel(selectedModel)) {
+    return cheapTurn({
+      ...options,
+      focus: options.focus ?? (options.playerSaid === WALK_UP ? "open" : "reply"),
+      playerSaid: options.playerSaid ?? WALK_UP,
+      emotion: options.emotion,
+      embedder: options.embedder ?? null,
+    });
+  }
   const timings = { ...DEFAULT_TIMINGS, ...options.timings };
   const now = options.now ?? (() => performance.now());
   const notes = options.notes ?? [];

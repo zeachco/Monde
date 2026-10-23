@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "../config.js";
 import { NO_TOKENS, type CallTokens } from "./pricing.js";
 import { DEFAULT_MODEL } from "./models.js";
+import { createOpenAIMindClient } from "./openaiClient.js";
 
 export interface StreamOptions {
   /** Aborts the call (deadline or client gone). The returned promise then rejects. */
@@ -123,7 +124,13 @@ export class DisabledMindClient implements MindClient {
   async createMessage(): Promise<Anthropic.Message> { throw new MindUnavailableError(); }
 }
 
-export function createMindClient(config: Pick<Config, "ANTHROPIC_API_KEY" | "ANTHROPIC_WORKSPACE_ID">): MindClient {
+export function createMindClient(
+  config: Pick<Config, "ANTHROPIC_API_KEY" | "ANTHROPIC_WORKSPACE_ID" | "MIND_PROVIDER" | "MIND_BASE_URL" | "MIND_API_KEY">,
+): MindClient {
+  // Any OpenAI-compatible endpoint (Ollama, llama.cpp…): no key required, so no DisabledMindClient branch.
+  if (config.MIND_PROVIDER === "openai") {
+    return createOpenAIMindClient({ baseUrl: config.MIND_BASE_URL, apiKey: config.MIND_API_KEY });
+  }
   if (!config.ANTHROPIC_API_KEY) return new DisabledMindClient();
   // One SDK retry: dialogue calls are bounded by their own deadlines (dialogue.ts), so a retry can only help
   // inside that window, and a prewarm that fails twice isn't worth a third try.
