@@ -5,6 +5,18 @@ From the repository root, install dependencies with `npm install`, then run
 Configuration is read from process environment variables; local .env files are
 not loaded automatically.
 
+The full list, with the local-LLM (Ollama) alternative and the `ollama pull`
+commands it needs, is in `.env.example` at the repository root.
+
+- `MIND_PROVIDER`: `anthropic` (default) or `openai` (any OpenAI-compatible
+  endpoint — Ollama, llama.cpp server, LM Studio; dialogue takes the cheap
+  plain-text path, `MIND_MODEL` becomes required, calls cost $0)
+- `MIND_MODEL` and `MIND_MODEL_<ROLE>`: model per role. Strict Claude ids on
+  the anthropic path (`claude-haiku-5-5` default), any model name on the
+  openai path (e.g. `gemma4:e2b`)
+- `MIND_BASE_URL` (default `http://127.0.0.1:11434/v1`), `MIND_API_KEY`,
+  `MIND_EMBED_MODEL` (optional embedding model for the cheap-path scorer):
+  openai path only
 - `PORT`: 8080
 - `NODE_ENV`: development, test, or production (default development)
 - `MONDE_ENV`: dev, staging, or production (default dev)
